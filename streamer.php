@@ -37,13 +37,13 @@ $presets = array(
 foreach($presets as $source_preset => $preset_list) {
   $source_dir = HLS_INPUT_DIR."\\{$source_preset}";  
   if(!is_dir($source_dir)) {
-	print HLS_INPUT_DIR."\\{$source_preset} is not a valid directory. Skipping to next preset.\n";
+    print HLS_INPUT_DIR."\\{$source_preset} is not a valid directory. Skipping to next preset.\n";
     continue;    
   }
 
   $filenames  = explode("\n", trim(shell_exec("dir /b {$source_dir}")));
   if(count($filenames) == 1 && empty($filenames[0])) {
-	print "No files found in ".HLS_INPUT_DIR."\\{$source_preset} Skipping to next preset.\n";
+    print "No files found in ".HLS_INPUT_DIR."\\{$source_preset} Skipping to next preset.\n";
     continue;
   }
   
@@ -63,11 +63,10 @@ foreach($presets as $source_preset => $preset_list) {
     $source_height = $matches[2];
     foreach($preset_list as $preset_height => $preset_width) {
       $playlist .= encode_hls_segments($source_dir, $filename, $source_width, $source_height, $preset_width, $preset_height);
-	  
-	  // do some post-processing on the playlist to remove hardcoded disk paths
+      // do some post-processing on the playlist to remove hardcoded disk paths
       $variant = file_get_contents(HLS_OUTPUT_DIR.'\\'.$preset_height.'\\'.$filename.'_'.$preset_height.'.m3u8');
-	  $variant = str_replace(HLS_OUTPUT_DIR.'\\'.$preset_height.'\\', '', $variant);
-	  file_put_contents(HLS_OUTPUT_DIR.'\\'.$preset_height.'\\'.$filename.'_'.$preset_height.'.m3u8', $variant);
+      $variant = str_replace(HLS_OUTPUT_DIR.'\\'.$preset_height.'\\', '', $variant);
+      file_put_contents(HLS_OUTPUT_DIR.'\\'.$preset_height.'\\'.$filename.'_'.$preset_height.'.m3u8', $variant);
       print "WOOHOO! {$filename}.mp4 has been encoded for HLS at {$preset_height}p\n";      
     }
 
@@ -110,7 +109,7 @@ function encode_hls_segments($source_dir, $filename, $source_width, $source_heig
   $args['segment_list']   = HLS_OUTPUT_DIR."\\{$preset_height}\\{$filename}_{$preset_height}.m3u8"; // output path for variant playlists
   $args['segment_format'] = 'mpeg_ts';                                                              // set segment format
   $args['map']            = '0';                                                                    // map all outputs to the same input file
-  $args['flags']	      = '-global_header';                                                       // MPEG-2 transport streams require some extra information in each frame
+  $args['flags']	  = '-global_header';                                                       // MPEG-2 transport streams require some extra information in each frame
   $args['g']              = '100';                                                                  // set maximum GOP size
   $args['keyint_min']     = '100';                                                                  // set minimum GOP size
   $args['sc_threshold']   = '0';                                                                    // disable insertion of i-frames at scene change
