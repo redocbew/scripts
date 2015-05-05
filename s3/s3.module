@@ -1,0 +1,851 @@
+<?php
+// $Id: s3.module,v 1.0 2013/04/17 13:31:00 redocbew Exp $
+
+
+/**
+ * A Drupal 6 front end for the S3_client class.
+ * The functions below are organized into three major groups, and subdivived
+ * further based on thier purpose.
+ *
+ * D6:       Function is specific to Drupal 6 and does not exist in any other branch.
+ * Modified: Function exists in more than one branch, but has been modified to fit that specific platform
+ * Global:   Function exists unchanged across all branches
+ */
+
+
+require_once '/var/www/aws_client/S3_client.php';
+
+define('AWS_USERNAME', 's3_client');
+
+define('S3_CONTENT_TYPE', 's3filepost');
+
+define('S3_UPLOADER_NODE_FORM'    , 'node_form');
+define('S3_UPLOADER_BROWSER_EMBED', 'browser_embed');
+define('S3_UPLOADER_OPTIONS'      , 'uploader_options');
+
+define('S3_PSEUDO_BYTES', 24);
+define('S3_SALT_LENGTH' , 4);
+
+define('S3_MAIL_RATE_LIMIT', 60*10); // 10 minutes
+
+/********* Core Drupal API functions *********/
+
+
+/**
+ * Implementation of hook_theme().
+ * @group D6
+ */
+function s3_theme() {
+  return array(
+    's3_browser' => array(
+      'arguments' => array('object_list' => array(), 'modify_files' => false),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_object_list' => array(
+      'arguments' => array('object_list' => array(), 'modify_files' => false),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_hidden_field' => array(
+      'arguments' => array('id' => '', 'value' => ''),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_uploader_files' => array(
+      'arguments' => array(),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_share_emails' => array(
+      'arguments' => array(),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_share_html_mail' => array(
+      'arguments' => array('full_name' => '', 'path' => ''),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_share_mail' => array(
+      'arguments' => array('full_name' => '', 'path' => ''),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_plupload_wrapper' => array(
+      'arguments' => array(),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_message_block' => array(
+      'arguments' => array('id' => ''),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+    's3_form_buttons' => array(
+      'arguments' => array('buttons' => array()),
+      'file'      => 'includes/s3.theme.inc'
+    ),
+  );
+}
+
+
+/**
+* Implementation of hook_node_info().
+* @group Modified
+*/
+function s3_node_info() {
+  return array(
+    S3_CONTENT_TYPE => array(
+      'name' => t('filepost'),
+      'module' => 's3',
+      'description' => t("A page which allows files to be uploaded and downloaded from Amazon S3"),
+      'has_title' => TRUE,
+      'title_label' => t('Title'),
+      'has_body' => TRUE,
+      'body_label' => t('Body'),
+    )
+  );
+}
+
+
+/**
+ * Implementation of hook_cron()
+ * Make per-filepost expiration dates work.
+ * @group Global
+ */
+function s3_cron() {
+  $result = db_query(
+    'SELECT s3.nid
+      FROM s3_client s3
+      JOIN node n USING (nid)
+      WHERE %d > s3.expire
+      AND s3.expire > 0',
+    time()
+  );
+
+  while($filepost = db_fetch_object($result)) {
+    node_delete($filepost->nid);
+  }
+}
+
+
+/**
+* Implementation of hook_form().
+* @group Modified
+*/
+function s3_form($node, $form_state) {
+  $form['title'] = array(
+    '#type'          => 'textfield',
+    '#title'         => 'Title',
+    '#required'      => TRUE,
+    '#default_value' => $node->title,
+    '#weight'        => -5
+  );
+
+  $form['body_field'] = node_body_field($node, 'Body', 0);
+  if(empty($node->nid)) {
+    $token = s3_get_token();
+    $form['s3_token'] = array('#type' => 'hidden', '#value' => $token);
+
+    $bucket = variable_get('s3_bucket', '');
+    if(empty($bucket)) {
+      $form['s3_uploader'] = array('#value' => 'S3_client must first be configured with the name of an Amazon S3 bucket before it can list or upload files.');
+      return;
+    }
+
+    $js = array(
+      'bucket'      => $bucket,
+      'module_path' => drupal_get_path('module', 's3'),
+      'extensions'  => s3_upload_extensions(),
+      'view'        => S3_UPLOADER_NODE_FORM,
+      'session_id'  => session_id(),
+    );
+
+    drupal_add_css(drupal_get_path('module', 's3').'/s3.css');
+    drupal_add_js(drupal_get_path('module' , 's3').'/s3_functions.js');
+    drupal_add_js(drupal_get_path('module' , 's3').'/s3_uploader.js');
+    drupal_add_js(drupal_get_path('module' , 's3').'/includes/plupload/js/plupload.full.min.js');
+    drupal_add_js(drupal_get_path('module' , 's3').'/includes/jquery-1.9.1.min.js');
+    drupal_add_js(array('s3_uploader' => $js), 'setting');
+
+    $form['s3_uploader'] = s3_options(S3_UPLOADER_NODE_FORM, 'S3 uploader');
+  } else {
+    $opts = db_fetch_object(db_query("SELECT prefix, modify_files, expire, private FROM s3_client WHERE nid = %d", $node->nid));
+
+    $opts->created       = $node->created;
+    $form['s3_uploader'] = s3_options(S3_UPLOADER_OPTIONS, 'Filepost options', $opts);
+  }
+
+  return $form;
+}
+
+
+/**
+ * Implementation of hook_insert().
+ * Populate local table of filepost options
+ * @group Global
+ */
+function s3_insert($node) {
+  $prefix = rawurlencode(preg_replace('/[^a-zA-Z0-9 ]/', '', $node->title)).session_id();
+  db_query(
+    "INSERT INTO s3_client (nid, modify_files, prefix, expire, private) VALUES (%d, %d, '%s', %d, %d)",
+    $node->nid, $node->s3_modify_files, $prefix, $node->s3_expiration, $node->s3_private
+  );
+}
+
+
+/**
+* Implementation of hook_update().
+* Update any filepost options which might have changed
+* @group Global
+*/
+function s3_update($node) {
+  db_query(
+    "UPDATE s3_client SET modify_files = %d, expire = %d, private = %d WHERE nid = %d",
+    $node->s3_modify_files, $node->s3_expiration, $node->s3_private, $node->nid
+  );
+}
+
+
+/**
+* Implementation of hook_delete()
+* Delete node from local database and any associated files from S3
+* @group Global
+*/
+function s3_delete($node) {
+  $bucket = variable_get('s3_bucket', '');
+  $s3     = s3_get_client($bucket, TRUE);
+  $opts   = db_fetch_object(db_query("SELECT prefix FROM s3_client WHERE nid = %d", $node->nid));
+
+  $s3->delete(AWS_S3_OBJECT_DIRECTORY, $bucket, $opts->prefix);
+  db_query('DELETE FROM s3_client WHERE nid = %d', $node->nid);
+}
+
+
+/**
+* Implementation of hook_load().
+* Include filepost options in node object
+* @group Global
+*/
+function s3_load($node) {
+  return db_fetch_object(db_query('SELECT prefix, modify_files, expire, private FROM s3_client WHERE nid = %d', $node->nid));
+}
+
+
+/**
+* Implementation of hook_view().
+* Render filepost pages for display
+* @group Modified
+*/
+function s3_view($node, $teaser = FALSE, $page = FALSE) {
+  global $user;
+
+  $node = node_prepare($node, $teaser);
+  $opts = db_fetch_object(db_query('SELECT prefix, modify_files, expire, private FROM s3_client WHERE nid = %d', $node->nid));
+
+  $bucket        = variable_get('s3_bucket', '');
+  $s3            = s3_get_client($bucket, TRUE);
+  $opts->created = $node->created;
+
+  drupal_set_html_head('<style type="text/css" media="all">@import "'.'/'.drupal_get_path('module', 's3').'/s3.css'.'";</style>');
+  drupal_add_js(drupal_get_path('module', 's3').'/includes/jquery-1.9.1.min.js');
+  drupal_add_js(drupal_get_path('module', 's3').'/s3_browser.js');
+  drupal_add_js(drupal_get_path('module', 's3').'/s3_functions.js');
+
+  $browser = theme('s3_browser', s3_object_list($opts->prefix, true), $opts->modify_files);
+  $js = array(
+    'bucket'      => $bucket,
+    'module_path' => drupal_get_path('module', 's3'),
+    'extensions'  => s3_upload_extensions(),
+    'view'        => S3_UPLOADER_BROWSER_EMBED,
+    'prefix'      => $opts->prefix,
+    'nid'         => $node->nid,
+    'token'       => s3_get_token($opts->prefix),
+  );
+
+  drupal_add_js(array('s3_uploader' => $js), 'setting');
+  if(user_access('upload s3 objects') && $opts->modify_files) {
+    drupal_add_js(drupal_get_path('module', 's3').'/s3_uploader.js');
+    drupal_add_js(drupal_get_path('module', 's3').'/includes/plupload/js/plupload.full.min.js');
+    $uploader = drupal_render(s3_options(S3_UPLOADER_BROWSER_EMBED, 'Add files', $opts));
+  }
+
+  if(user_access('share files')) {
+    $share = drupal_render(s3_share_files($node->nid));
+  }
+
+  $node->content['s3_browser'] = array(
+    '#value'  => $browser.$share.$uploader,
+    '#weight' => 1,
+  );
+
+  return $node;
+}
+
+
+/**
+ * Implementation of hook_menu_alter().
+ * @group D6
+ */
+function s3_menu_alter(&$items) {
+  $items['node/%node']['access callback'] = 's3_node_access';
+}
+
+
+/**
+ * Allow anonymous access to fileposts if there's a valid request token.
+ * @param $nid   integer A node ID
+ * @param $token string  A token generated by s3_get_token()
+ * @group Modified
+ */
+function s3_node_access($op, $node, $account = null) {
+  global $user;
+  if($op != 'view' || empty($_GET['t']) || $node->type != S3_CONTENT_TYPE) {
+    return node_access($op, $node, $account);
+  }
+
+  if(empty($account)) {
+    $account = $user;
+  }
+
+  if(!is_numeric($node->nid)) {
+    return false;
+  }
+
+  $opts = db_fetch_object(
+    db_query(
+      "SELECT s3.prefix, s3.private FROM s3_client s3 WHERE nid = %d", $node->nid
+    )
+  );
+
+  if(empty($opts)) {
+    return false;
+  }
+
+  $awesome_token = s3_check_token($_GET['t'], $opts->prefix);
+  if($opts->private) {
+    if($node->uid == $account->uid) {
+      return user_access('view s3 objects');
+    }
+
+    return user_access('view private fileposts') || $awesome_token;
+  }
+
+  return user_access('view s3 objects') || $awesome_token;
+}
+
+
+/**
+ * Implementation of hook_perm().
+ * @group Global
+ */
+function s3_perm() {
+  return array('administer s3', 'upload s3 objects', 'view s3 objects', 'delete s3 objects', 'view private fileposts', 'share files');
+}
+
+
+/**
+ * Implementation of hook_menu().
+ * @group Modified
+ */
+function s3_menu() {
+  $items['admin/settings/s3'] = array(
+    'title'            => 'Amazon S3 Integration',
+    'description'      => "Configure settings for Amazon S3 integration",
+    'type'             => MENU_NORMAL_ITEM,
+    'page callback'    => 'drupal_get_form',
+    'page arguments'   => array('s3_settings_form'),
+    'access arguments' => array('administer s3'),
+  );
+
+  $items['s3/js/get'] = array(
+    'type'             => MENU_CALLBACK,
+    'page callback'    => 's3_js_get',
+    'access callback'  => true,
+  );
+
+  $items['s3/js/delete'] = array(
+    'type'             => MENU_CALLBACK,
+    'page callback'    => 's3_js_delete',
+    'access arguments' => array('delete s3 objects'),
+  );
+
+  $items['s3/js/upload_policy'] = array(
+    'type'             => MENU_CALLBACK,
+    'page callback'    => 's3_js_upload_policy',
+    'access arguments' => array('upload s3 objects'),
+  );
+
+  $items['s3/js/share'] = array(
+    'type'             => MENU_CALLBACK,
+    'page callback'    => 's3_js_share',
+    'access arguments' => array('share files'),
+  );
+
+  return $items;
+}
+
+
+/********* Form fieldset functions *********/
+
+
+/**
+ * Create the fieldset used for sharing fileposts
+ */
+function s3_share_files($nid) {
+  $fieldset = array(
+    '#type'        => 'fieldset',
+    '#title'       => 'Share files',
+    '#collapsible' => TRUE,
+    '#collapsed'   => TRUE,
+    '#weight'      => module_exists('content') ? content_extra_field_weight(S3_CONTENT_TYPE, 's3') : -2,
+  );
+
+  $fieldset['email'] = array(
+    '#type'   => 'markup',
+    '#value'  => theme('s3_share_emails'),
+    '#weight' => 1,
+  );
+
+  $fieldset['submit'] = array(
+    '#type'   => 'markup',
+    '#value'  => theme('s3_form_buttons', array('s3_share_filepost' => 'Share Files')),
+    '#weight' => 3,
+  );
+
+  $fieldset['messages'] = array(
+    '#type'   => 'markup',
+    '#value'  => theme('s3_message_block', 's3_share_messages'),
+    '#weight' => 4,
+  );
+
+  $fieldset['nid'] = array(
+    '#type'   => 'markup',
+    '#value'  => theme('s3_hidden_field', 's3_share_nid', $nid),
+    '#weight' => 5,
+  );
+
+  return $fieldset;
+}
+
+
+/**
+ * Create the S3 options fieldset
+ * @group Modified
+ */
+function s3_options($fieldset_view, $title, $opts = null) {
+  $fieldset = array(
+    '#type'        => 'fieldset',
+    '#title'       => $title,
+    '#collapsible' => TRUE,
+    '#collapsed'   => FALSE,
+    '#weight'      => module_exists('content') ? content_extra_field_weight(S3_CONTENT_TYPE, 's3') : -2,
+  );
+
+  if($fieldset_view == S3_UPLOADER_OPTIONS || $fieldset_view == S3_UPLOADER_NODE_FORM) {
+    $start = $fieldset_view == S3_UPLOADER_NODE_FORM ? time() : $opts->created;
+    $end   = strtotime('+1 year', $start);
+
+    $expire_dates = array('Never');
+    foreach(range($start, $end, 60*60*24) as $timestamp) {
+      $expire_dates[$timestamp] = date('m/d/Y', $timestamp);
+    }
+
+    $fieldset['s3_expiration'] = array(
+      '#type'          => 'select',
+      '#title'         => 'Expiration date',
+      '#default_value' => $opts->expire,
+      '#options'       => $expire_dates,
+      '#weight'      => 4,
+      '#description' => 'If these files are intended for one-time or limited use, set an expiration date to prevent them from hanging around forever.'
+    );
+
+    $fieldset['s3_modify_files'] = array(
+      '#type'          => 'checkbox',
+      '#title'         => 'Allow files to be added or deleted',
+      '#default_value' => $fieldset_view == S3_UPLOADER_NODE_FORM ? 1 : $opts->modify_files,
+      '#weight'        => 5,
+      '#description'   => 'Check this box to allow files to be added or removed once posted.'
+    );
+
+    $fieldset['s3_private'] = array(
+      '#type'          => 'checkbox',
+      '#title'         => 'Filepost is private',
+      '#default_value' => $opts->private,
+      '#weight'        => 6,
+      '#description'   => 'Check this box if this filepost contains files which should not be made public.'
+    );
+  }
+
+  if($fieldset_view == S3_UPLOADER_OPTIONS) {
+    return $fieldset;
+  }
+
+  $fieldset['#description'] = "Select the files to be displayed on this page.  You can create folders to help organize the filepost. Click on a folder to open it.  Files will be uploaded into the currently open folder, or placed loose within the filepost if no folder is selected.";
+  $fieldset['files'] = array(
+    '#type'   => 'markup',
+    '#value'  => theme('s3_uploader_files'),
+    '#weight' => -1,
+  );
+
+  $fieldset['plupload_wrapper'] = array(
+    '#type'   => 'markup',
+    '#value'  => theme('s3_plupload_wrapper'),
+    '#weight' => 0,
+  );
+
+  $fieldset['messages'] = array(
+    '#type'   => 'markup',
+    '#value'  => theme('s3_message_block'),
+    '#weight' => 1,
+  );
+
+  $fieldset['folder_name'] = array(
+    '#title'       => 'Create new folder',
+    '#type'        => 'textfield',
+    '#id'          => 's3_folder_name',
+    '#description' => 'Enter the name of the folder you wish to create.',
+    '#weight'      => 2,
+  );
+
+  $fieldset['create_folder'] = array(
+    '#type'   => 'markup',
+    '#value'  => theme('s3_form_buttons', array('s3_create_folder' => 'Create folder')),
+    '#weight' => 3,
+  );
+
+  return $fieldset;
+}
+
+
+/**
+ * Integrate with CCK to provide a configurable placement for the uploader
+ * fieldset when creating new fileposts.
+ * @group D6
+ */
+function s3_content_extra_fields($type_name) {
+  $extras = array();
+  if($type_name == S3_CONTENT_TYPE) {
+    $extras['s3'] = array(
+      'label'       => t('File uploads'),
+      'description' => t('S3 module listing'),
+      'weight'      => 30,
+    );
+  }
+
+  return $extras;
+}
+
+
+/********* Menu callback functions *********/
+
+
+/**
+ * Ajax-ish callback function for fetching the contents of a directory in the
+ * S3 browser.
+ * @group Global
+ */
+function s3_js_get() {
+  $s3 = new S3_client(AWS_USERNAME);
+
+  $path_args = func_get_args();
+  $nid       = array_shift($path_args);
+  $token     = array_shift($path_args);
+  $opts      = db_fetch_object(db_query('SELECT modify_files FROM s3_client WHERE nid = %d', $nid));
+
+  // Drupal urldecodes these parameters for me, which in this case just gets in
+  // the way.
+  foreach($path_args as $arg) {
+    $parts[] = rawurlencode($arg);
+  }
+
+  $prefix = implode('/', $parts);
+  if(s3_check_token($token, $prefix)) {
+    print theme('s3_object_list', s3_object_list($prefix), $opts->modify_files);
+  }
+}
+
+
+/**
+ * Ajax-ish callback function for generating the policy and signature for each
+ * selected file in the S3 uploader.
+ * @group Global
+ */
+function s3_js_upload_policy() {
+  $bucket = variable_get('s3_bucket', '');
+  if(!($s3 = s3_get_client($bucket))) {
+    print '';
+    return;
+  }
+
+  $path_args = func_get_args();
+  $filename  = array_pop($path_args);
+  $prefix    = implode('/', $path_args);
+
+  $params = $s3->get_upload_parameters($bucket, $prefix, $filename);
+  $params['success'] = !empty($params);
+  print json_encode($params);
+}
+
+
+/**
+ * Ajax-ish callback function for deleting an object in the S3 browser.
+ * @group Global
+ */
+function s3_js_delete() {
+  $bucket = variable_get('s3_bucket', '');
+  if(!($s3 = s3_get_client($bucket))) {
+    print json_encode(false);
+    return;
+  }
+
+  $path_args   = func_get_args();
+  $token       = array_shift($path_args);
+  $object_type = array_shift($path_args);
+
+  foreach($path_args as $arg) {
+    $parts[] = rawurlencode($arg);
+  }
+
+  $key = implode('/', $parts);
+  if(s3_check_token($token, $object_type.'/'.$key)) {
+    if($s3->delete($object_type, $bucket, $key)) {
+      print json_encode(true);
+      return;
+    }
+  }
+
+  print json_encode(false);
+}
+
+
+/**
+ * Send an email containing a link allowing anonymous access to a filepost
+ * @param $nid integer    A node ID
+ * @param $token string   A token generated by s3_get_token()
+ * @param $to_list string A list of email addresses
+ * @group Global
+ */
+function s3_js_share($to_list, $nid, $token) {
+  global $user;
+  global $base_url;
+//  if((variable_get('s3_mail_last_sent', 0) + S3_MAIL_RATE_LIMIT) > time()) {
+//    return;
+//  }
+
+  if(empty($to_list) || !is_numeric($nid)) {
+    print json_encode(false);
+    return;
+  }
+
+  $result = db_query("SELECT prefix FROM s3_client WHERE nid = %d", $nid);
+  if(pg_num_rows($result) == 0) {
+    print json_encode(false);
+    return;
+  }
+
+  $opts = db_fetch_object($result);
+  if(!s3_check_token($token, $opts->prefix)) {
+    print json_encode(false);
+    return;
+  }
+
+  $profile = db_fetch_object(
+    db_query(
+      "SELECT pv.value AS full_name
+      FROM profile_fields pf
+      JOIN profile_values pv USING (fid)
+      JOIN users u USING (uid)
+      WHERE pv.fid = 2
+      AND u.uid = {$user->uid}"
+    )
+  );
+
+  $subject = "You've been sent files from the ".variable_get('site_name', '');
+  $header  = "From: ".variable_get('site_mail', 'web@marmot.com')."\r\n";
+  $header .= "MIME-Version: 1.0\r\n";
+  $header .= "Content-type: text/html; charset=iso-8859-1\r\n";
+  $body    = theme('s3_share_mail', $profile->full_name, $base_url.'node/'.$nid.'?t='.s3_get_token($opts->prefix));
+  $mail_sent = mail($to_list, $subject, $body, $header);
+  if($mail_sent) {
+    variable_set('s3_mail_last_sent', time());
+    print json_encode(true);
+  } else {
+    print json_encode(false);
+  }
+}
+
+
+/**
+ * Internal settings page.  Manually set a few details which the application
+ * can't figure out on its own.
+ * @group D6
+ */
+function s3_settings_form() {
+  $form['s3_bucket'] = array(
+    '#type'          => 'textfield',
+    '#title'         => t('Amazon S3 bucket name'),
+    '#default_value' => variable_get('s3_bucket', ''),
+    '#size'          => 60,
+    '#required'      => TRUE,
+    '#description'   => 'The name of the Amazon S3 bucket used by this site.'
+  );
+
+  $form['s3_bucket_distribution'] = array(
+    '#type'          => 'textfield',
+    '#title'         => t('CloudFront distribution'),
+    '#default_value' => variable_get('s3_bucket_distribution', ''),
+    '#size'          => 60,
+    '#description'   => 'If this bucket can be distributed using the CloudFront CDN, enter the root URL of the distribution here.'
+  );
+
+  $form['s3_extensions'] = array(
+    '#type'          => 'textfield',
+    '#title'         => t('Accepted file extensions'),
+    '#default_value' => variable_get('s3_extensions', 'doc, xls, pdf, docx, xlsx, pptx, ppt, pps, jpg, gif, png, jpeg, ai, psd, eps, tif, tiff'),
+    '#size'          => 60,
+    '#maxlength'     => 256,
+    '#description'   => 'Enter a comma separated list of file extensions allowed for upload to S3.'
+  );
+
+  return system_settings_form($form);
+}
+
+
+/********* Helper functions *********/
+
+
+/**
+ * Get from S3 all the files contained within a single "directory"
+ * @param string $prefix A key prefix identifying the "directory" being listed
+ * @param bool   $scream TRUE if error messages are to be displayed on-screen
+ * @group Global
+ */
+function s3_object_list($prefix = '', $scream = FALSE) {
+  global $base_url;
+
+  $bucket = variable_get('s3_bucket', '');
+  $cdn    = variable_get('s3_bucket_distribution', '');
+
+  $s3   = s3_get_client($bucket, $scream);
+  $list = $s3->get_list($bucket, $prefix, $cdn);
+  if(!is_array($list)) {
+    s3_logger($s3->get_last_error(), $scream);
+    return array();
+  }
+
+  // generate tokens for each request
+  foreach($list as $index => $object) {
+    $list[$index]->delete_url = s3_get_token($object->delete_url).'/'.$object->delete_url;
+    if($object->type == AWS_S3_OBJECT_DIRECTORY) {
+      $list[$index]->get_url = s3_get_token($object->get_url).'/'.$object->get_url;
+    }
+  }
+
+  return $list;
+}
+
+
+/**
+ * Return the list of file extensions allowed for upload to S3
+ * @group Global
+ */
+function s3_upload_extensions() {
+  // TODO:  Group extensions by type.  Ex: "Image files", "Office files"
+  $extensions = variable_get('s3_extensions', 'doc, xls, pdf, docx, xlsx, pptx, ppt, pps, jpg, gif, png, jpeg, ai, psd, eps, tif, tiff');
+  // a little extra cleaning in case of overly creative users
+  return explode(',', str_replace(array(' ', '.'), '', strtolower($extensions)));
+}
+
+
+/**
+ * Log status and error messages to the screen and/or the system log
+ * @param string $err_msg     The message being logged
+ * @param string $err_display TRUE if the message should be displayed on-screen
+ * @group Global
+ */
+function s3_logger($err_msg, $err_display = FALSE) {
+  if($err_display) {
+    drupal_set_message($err_msg, 'error');
+  }
+
+  watchdog('s3', $err_msg, array(), WATCHDOG_ERROR);
+}
+
+
+/**
+ * Helper function to retrieve an instance of S3_client and test a bucket
+ * @param string $bucket The name of an Amazon S3 bucket
+ * @param string $scream TRUE if error messages should be displayed on-screen
+ * @group Global
+ */
+function s3_get_client($bucket, $scream = FALSE) {
+  if(empty($bucket)) {
+    s3_logger('S3 client must first be configured with the name of an Amazon S3 bucket.  Check your configuration settings.', $scream);
+    return null;
+  }
+
+  $s3 = new S3_client(AWS_USERNAME);
+  if(!$s3->bucket_exists($bucket)) {
+    s3_logger('The bucket name provided does not exist, or you do not have access to it.  Check that your configuration settings match the bucket created in S3.', $scream);
+    return null;
+  }
+
+  return $s3;
+}
+
+
+/**
+ * Generate a non-repeatable token for usage in ajax requests.  The S3_client
+ * class has similar functionality, but I don't want to phone home to S3 every
+ * time I request a token.
+ * @param string $seed The seed string used to form this token.  Used to restrict the space of valid tokens during verification.
+ * @group Global
+ */
+function s3_get_token($seed = null) {
+  $key = variable_get('s3_private_key', null);
+  if(empty($key)) {
+    $key = utf8_encode(openssl_random_pseudo_bytes(S3_PSEUDO_BYTES));
+    variable_set('s3_private_key', $key);
+  }
+
+  // TODO: Move these arrays and those in s3_check_token() into a helper
+  // function. Defines work for scalars only... grrr...
+  $base64_tchars  = array('/', '+', '=');
+  $replace_tchars = array('-', '.', '_');
+
+  if(empty($seed)) {
+    // generate token seed and hash key if necessary
+    $seed = variable_get('s3_token_seed', null);
+    if(empty($seed)) {
+      $seed = utf8_encode(openssl_random_pseudo_bytes(S3_PSEUDO_BYTES));
+      variable_set('s3_token_seed', $seed);
+    }
+  }
+
+  $salt   = substr(utf8_encode(openssl_random_pseudo_bytes(S3_PSEUDO_BYTES)), 0, S3_SALT_LENGTH);
+  $base64 = base64_encode($salt.hash_hmac('sha1', base64_encode($salt.$seed), $key, true));
+  return str_replace($base64_tchars, $replace_tchars, $base64);
+}
+
+
+/**
+ * Verify a token
+ * @param string $token A token to verify
+ * @param string $seed  The seed string of the token to check
+ * @group Global
+ */
+function s3_check_token($token, $seed = null) {
+  if(empty($token)) {
+    return false;
+  }
+
+  if(empty($seed)) {
+    $seed = variable_get('s3_token_seed', null);
+  }
+
+  // defines work for scalars and null values only... grrr...
+  $base64_tchars  = array('/', '+', '=');
+  $replace_tchars = array('-', '.', '_');
+  $key     = variable_get('s3_private_key', null);
+  $salt    = substr(base64_decode(str_replace($replace_tchars, $base64_tchars, $token)), 0, S3_SALT_LENGTH);
+
+  if(empty($seed) || empty($salt) || empty($key)) {
+    return false;
+  }
+
+  $base64t = base64_encode($salt.hash_hmac('sha1', base64_encode($salt.$seed), $key, true));
+  return strcmp($token, str_replace($base64_tchars, $replace_tchars, $base64t)) == 0;
+}

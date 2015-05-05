@@ -1,0 +1,6 @@
+; $Id: s3.info,v 1.0 2013/4/17 13:31:00 redocbew Exp $
+name = Amazon S3 Integration
+description = Add support for Amazon S3 to drupal
+package = Other
+version = VERSION
+core = 6.x

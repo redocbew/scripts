@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" dir="ltr">
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8"/>
+
+<title>Plupload - Custom example</title>
+
+<!-- production -->
+<script type="text/javascript" src="../js/plupload.full.min.js"></script>
+<!-- -->
+
+<!-- debug 
+<script type="text/javascript" src="../js/moxie.js"></script>
+<script type="text/javascript" src="../src/plupload.js"></script>
+-->
+
+</head>
+<body style="font:13px Verdana;background:url(bg.jpg);color:#333">
+
+<h1>Custom example</h1>
+
+<p>Shows you how to use the core plupload API.</p>
+
+<div id="container">
+	<div id="filelist"></div>
+    <br />
+    <a id="pickfiles" href="javascript:;">[Select files]</a> 
+    <a id="uploadfiles" href="javascript:;">[Upload files]</a>
+</div>
+
+
+<script type="text/javascript">
+// Custom example logic
+function $(id) {
+	return document.getElementById(id);	
+}
+
+
+var uploader = new plupload.Uploader({
+	runtimes : 'html5,flash,silverlight,html4',
+	browse_button : 'pickfiles', // you can pass in id or DOM Element itself
+	drop_element : $('container'), 
+	container: 'container',
+	max_file_size : '10mb',
+	url : 'upload.php',
+	resize : {width : 320, height : 240, quality : 90},
+	flash_swf_url : '../js/Moxie.swf',
+	silverlight_xap_url : '../js/Moxie.xap',
+	filters : [
+		{title : "Image files", extensions : "jpg,gif,png"},
+		{title : "Zip files", extensions : "zip"}
+	]
+});
+
+
+uploader.bind('FilesAdded', function(up, files) {
+	for (var i in files) {
+		$('filelist').innerHTML += '<div id="' + files[i].id + '">' + files[i].name + ' (' + plupload.formatSize(files[i].size) + ') <b></b></div>';
+	}
+});
+
+uploader.bind('UploadProgress', function(up, file) {
+	$(file.id).getElementsByTagName('b')[0].innerHTML = '<span>' + file.percent + "%</span>";
+});
+
+$('uploadfiles').onclick = function() {
+	uploader.start();
+	return false;
+};
+
+uploader.init();
+</script>
+</body>
+</html>

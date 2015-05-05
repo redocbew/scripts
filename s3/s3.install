@@ -1,0 +1,50 @@
+<?php
+
+function s3_schema() {
+  $schema['s3_client'] = array(
+    'description' => t('The base table for holding information on this instance of s3_client'),
+    'fields' => array(
+      'nid' => array(
+        'type'     => 'int',
+        'size'     => 'big',
+        'not null' => TRUE,
+        'default'  => 0),
+      'modify_files' => array(
+        'type'     => 'int',
+        'size'     => 'small',
+        'not null' => TRUE,
+        'default'  => 0),
+      'prefix' => array(
+        'type'     => 'varchar',
+        'size'     => 'normal',
+        'not null' => TRUE),
+      'expire' => array(
+        'type'     => 'int',
+        'size'     => 'big',
+        'default'  => 0),
+      'private' => array(
+        'type'     => 'int',
+        'size'     => 'small',
+        'default'  => 0),
+    ),
+    'primary key' => array('nid'),
+  );
+
+  return $schema;
+}
+
+
+/**
+ * Implementation of hook_install().
+ */
+function s3_install() {
+  drupal_install_schema('s3');
+}
+
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function s3_uninstall() {
+  drupal_uninstall_schema('s3');
+}

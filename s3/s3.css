@@ -1,0 +1,201 @@
+.s3_hidden {
+  display:none;
+}
+
+div.s3_uploads {
+  clear: both;
+  padding: 1px 10px;
+  position:relative;
+  max-height: 450px;
+  overflow: scroll;
+  overflow-y:auto;
+  overflow-x:hidden;
+}
+
+div.s3_row {
+  height: 1.7em;
+}
+
+div.s3_row, div.s3_nested, div.s3_header {
+  padding: 1px 10px;
+  clear: both;
+}
+
+div.s3_row:hover, div.nested div.s3_row:hover {
+  background-color: #FFC;
+  padding: 0px 9px;
+  border: 1px solid #e0e095;
+}
+
+div.s3_header {
+  padding: 0px 9px;
+  margin-top: 9px;
+  border-top: 1px solid #CCCCCC;
+}
+
+div.s3_nested div.s3_row {
+  float: left;
+  width: 100%;
+}
+
+div.s3_modified, div.s3_size {
+  float: left;
+  width: 100px;
+}
+
+div.s3_modified {
+  position: absolute;
+  right: 38px;
+}
+
+div.s3_size {
+  position: absolute;
+  right: 105px;
+}
+
+div.s3_delete {
+  position: absolute;
+  right: 40px;
+  cursor: pointer;
+  height: 1.8em;
+}
+
+div.s3_link {
+  width: 515px;
+  float: left;
+}
+
+span.s3_loader {
+  text-decoration: blink;
+  margin-left: 10px;
+}
+
+.s3_folder, .s3_file {
+  padding: 1px 0 1px 40px;
+  display: block;
+  overflow: hidden;
+  float: left;
+}
+
+.s3_folder {
+  background: url(images/folder.gif) left no-repeat;
+  color: #3E1800;
+  text-decoration: none;
+}
+
+.s3_open {
+  background: url(images/folder_open.gif) left no-repeat;
+}
+
+.s3_file {
+  background: url(images/file.gif) left no-repeat;
+}
+
+a.s3_doc, a.s3_docx, a.s3_docm, a.s3_dot, a.s3_dotx {
+  background: url(images/file-doc.gif) left no-repeat;
+}
+
+a.s3_xls, a.s3_xlsx, a.s3_xlsm, a.s3_xlsb, a.s3_xltm {
+  background: url(images/file-xls.gif) left no-repeat;
+}
+
+div.s3_link a.s3_pdf {
+  background: url(images/file-pdf.gif) left no-repeat;
+}
+
+div.s3_link a.s3_zip {
+  background: url(images/file-zip.gif) left no-repeat;
+}
+
+span.s3_empty {
+  padding: 1px 0 1px 30px;
+  display: block;
+  overflow: hidden;  
+}
+
+.s3_folder:hover {
+  color: #C92929;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+#s3_messages {
+  margin-top: 10px;
+}
+
+#s3_messages div.s3_error {
+  background-color: #CC0000;
+  padding: 15px;
+  color: #FFFFFF;
+}
+
+#s3_messages div.s3_bonehead {
+  background-color: #FFC;
+  padding: 15px;
+}
+
+div.s3_upload_name {
+  float: left;
+  position: relative;
+  width: 400px;
+}
+
+div.s3_upload_delete {
+  position: absolute;
+  right: 10px;
+  cursor: pointer;
+}
+
+div.s3_upload_size_header, #s3_uploader_percent {
+  position: absolute;
+  right: 75px;
+}
+
+div.s3_upload_status {
+  position: absolute;
+  right: 100px;
+}
+
+div.s3_upload_size {
+  position: absolute;
+  right: 35px;
+}
+
+div.s3_folder_name-wrapper, #s3_folder_name {
+  width: 200px;
+}
+
+div.s3_uploader_buttons {
+  clear: both;
+  height: 40px;
+}
+
+div.s3_uploader_buttons input.s3_button {
+  margin-right: 9px;
+}
+
+input.s3_button {
+  margin: 20px 0;
+}
+
+#s3_progress_bar {
+  border-radius: 10px;
+  padding: 2px;
+  width: 610px;
+}
+
+#s3_progress_bar div {
+  background-color: #E1DAD6;
+  width: 0%;
+  height: 16px;
+  border-radius: 10px;
+}
+
+#s3_uploader_label {
+  display: block;
+}
+
+#s3_uploader_file {
+  position:absolute;
+  padding-left: 10px;
+}
